@@ -46,7 +46,7 @@ This standard shall outline a new mechanism for IAX2 calls between nodes that ac
 
 4. Create a `res_config` use framework that permits the creation of on-demand IAX peername stanzas for key material. Backend ARA would be res_config_sqlite3. These dynamic contexts would use RSA-based challenge/response authentication native to IAX2 and also support calltokens properly.
 
-5. Create `res_asl_keymgr` that handles keys from directories and manages items within `res_crypto`.
+5. Create `res_asl_keymgr` that handles public keys from directories and manages items within `res_crypto`.
 
 6. Establish a "fallback" call mechanism in `app_rpt` to try the existing/legacy IAX call context type if the RSA-based context call fails.
 
