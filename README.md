@@ -16,7 +16,7 @@ supported features, APIs, and other structures.
 
 | Name | Status | Description |
 | --- | --- | --- |
-| ASL001-Node_Keyed_Authentication | *Draft* | Description of using public-private keypairs for node authentication |
+| ASL001-Node_Key-Based_Authentication | *Draft* | Description of using public-private keypairs for node authentication |
 
 ## Taxonomy
 
