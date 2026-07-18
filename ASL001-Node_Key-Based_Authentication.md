@@ -16,7 +16,9 @@ changes are acceptable.
 
 ## Terminology
 
-*Carrier-Grade NAT (CNGAT)* - A large-scale Network Address Translation deployment operated by a service provider at the network edge (rather than by the end user) that maps many subscribers' private IPv4 addresses to a smaller pool of shared public IPv4 addresses, typically to extend IPv4 address availability during the transition to IPv6.
+*Carrier-Grade NAT (CGNAT)* - A large-scale Network Address Translation deployment operated by a service provider at the network edge (rather than by the end user) that maps many subscribers' private IPv4 addresses to a smaller pool of shared public IPv4 addresses, typically to extend IPv4 address availability during the transition to IPv6.
+
+*IAX2 Call* -  A "node link" in `app_rpt` is an IAX2 call to Asterisk with special semantics handled as SMS text messages within the channel. This term is used throughout this document to refer to all IAX2 traffic between nodes that is not related to node registration. It is chosen purposefully to avoid mixing `app_rpt` concepts of "node linking" from the technical details of making IAX2-based connections between Asterisk servers. All "node links" are, by definition, an "IAX2 call" because `app_rpt` linking is layered on top of one.
 
 *Node Registration* - An AllStarLink node's authentication to the AllStarLink
 infrastructure. Successful registration in legacy mode updates an IPv4 address
@@ -38,20 +40,22 @@ Since the inception of AllStarLink, the process to validate or authenticate IAX2
 ## Objectives
 This standard shall outline a new mechanism for IAX2 calls between nodes that accomplishes the following:
 
-1. Node Registration stores an IPv4 address, an IPv6 address, and retrieves private key material for node-to-node communication.
+1. Node Registration stores an IPv4 address, an IPv6 address, and retrieves private key material for node-to-node communication. Node registration shall be bimodal in that a registration shall be made for both an IPv4 and IPv6 address. This will be accomplished by two different registrations, one using IPv4 and one using IPv6. This will avoid problems with IPv4 "final address" detection issues due to NAT and problems with ephemeral IPv6 addressing schemes if such are employed on a Linux host.
 
 2. Outbound IAX2 calls from a node shall exclusively use DNS resolution of `A`, `AAAA`, and `SRV` records to determine destination addresses and ports of calls (unless node destinations are explicitly defined in `rpt.conf`).
 
 3. Outbound IAX2 calls shall use IPv6 addressing if mutually available between callers, otherwise IPv4 shall be used.
 
-4. Create a `res_config` use framework that permits the creation of on-demand IAX peername stanzas for key material. Backend ARA would be res_config_sqlite3. These dynamic contexts would use RSA-based challenge/response authentication native to IAX2 and also support calltokens properly.
+4. Create a `res_config` use framework that permits the creation of on-demand IAX peername stanzas to match 1:1 from a node to its key material as an IAX named context. Backend ARA (Asterisk Realtime Architecture) would be res_config_sqlite3. These dynamic contexts would use RSA-based challenge/response authentication native to IAX2 and also support calltokens properly. Note: `res_config` is a dynamic configuration module for Asterisk that is part of the core system. This would insert and remove IAX2 peer contexts on demand from the `chan_iax` stack. See https://docs.asterisk.org/Fundamentals/Asterisk-Configuration/Database-Support-Configuration/Realtime-Database-Configuration/.
 
 5. Create `res_asl_keymgr` that handles public keys from directories and manages items within `res_crypto`.
 
 6. Establish a "fallback" call mechanism in `app_rpt` to try the existing/legacy IAX call context type if the RSA-based context call fails.
 
 ## Technical Specifications
-TODO
+
+### Use of Keys
+
 
 ### Modern Node Registration
 TODO
