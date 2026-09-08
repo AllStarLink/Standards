@@ -17,6 +17,7 @@ supported features, APIs, and other structures.
 | Name | Status | Description |
 | --- | --- | --- |
 | ASL001-Node_Key-Based_Authentication | *Draft* | Description of using public-private keypairs for node authentication |
+| ASL002-App_Authentication | *Draft* | Technical specification of the Application Authentication (AA) method |
 
 ## Taxonomy
 
