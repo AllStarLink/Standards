@@ -78,7 +78,7 @@ for 20 seconds will result in a 5 minute IP-level block.
 * All API calls will return HTTP 200 upon successful HTTP-level
 and message-syntax correctness. Note: this means that an implementing
 client must parse the response to determine if authentication has
-succeeded or failed. Unlikely register.allstarlink.org, this API
+succeeded or failed. Unlike register.allstarlink.org, this API
 will not incorrectly return an HTTP 403 for a non-forbidden API call
 regardless of the internal authentication status.
 
