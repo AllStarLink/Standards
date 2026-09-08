@@ -53,14 +53,34 @@ in length
 
 * All numbers/integers are 64-bit unsigned integers unless otherwise specified
 
-* Creation of OTU tokens will be limited per IP address to 1 per second
+* Creation of OTU tokens will be limited per IP address to 1 per second. Requests
+beyond 1 per second for up to 10 seconds is considered a soft limit and
+will be met with an HTTP 429 response. Persistent soft limit exhaustion
+for 20 seconds will result in a 5 minute IP-level block.
 
-* Creation of OTU tokens will be limited per username to 1 per second
+* Creation of OTU tokens will be limited per username to 1 per second. Requests
+beyond 1 per second for up to 10 seconds is considered a soft limit and
+will be met with an HTTP 429 response. Persistent soft limit exhaustion
+for 20 seconds will result in a 5 minute IP-level block.
 
 * Creation of OTU tokens will be limited to a maximum of 10 tokens per username
 on a rolling basis - i.e., only 10 tokens will be stored in the table
 and available for use at any given time without limit to replenishment
-subject to the above limits
+subject to the above limits. Issuance of token #11 will cause #1 to
+be expired, and so forth.
+
+* Authentication validation requests will be limited to a maximum of 10
+per second per IP on a sliding window basis.  Requests
+beyond 10 per second for up to 10 seconds is considered a soft limit and
+will be met with an HTTP 429 response. Persistent soft limit exhaustion
+for 20 seconds will result in a 5 minute IP-level block.
+
+* All API calls will return HTTP 200 upon successful HTTP-level
+and message-syntax correctness. Note: this means that an implementing
+client must parse the response to determine if authentication has
+succeeded or failed. Unlikely register.allstarlink.org, this API
+will not incorrectly return an HTTP 403 for a non-forbidden API call
+regardless of the internal authentication status.
 
 ### Initial Authentication
 An application shall POST to an endpoint at `https://api.allstarlink.org/TODO/appauth/request`. This endpoint
