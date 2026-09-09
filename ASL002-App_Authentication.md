@@ -18,7 +18,8 @@ Years ago, the allstarlink.org website hosted a Java Applet communicator
 to interoperate with standard nodes on the AllStarLink Network. In the
 intervening years, the authentication method developed for this applet
 named "Web Transceiver" became the de facto standard for authenticating
-mobile and desktop applications to the AllStarLink network. These terms are used today: "WebTransceiver mode", "WT auth", "WT Mode", etc.
+mobile and desktop applications to the AllStarLink network. These terms
+are used today: "WebTransceiver mode", "WT auth", "WT Mode", etc.
 
 This process has several fundamental flaws that make it unsuitable for
 modern Internet-based applications.
@@ -53,6 +54,13 @@ in length
 
 * All numbers/integers are 64-bit unsigned integers unless otherwise specified
 
+* Applications implementing AA shall generate a UUIDv4 once, at install
+or initial configuration time, and persist it for the lifetime of that
+installation. This value is required as the `client-id` field on token
+requests (see below). It is client-asserted and used solely as a
+rate-limiting and telemetry signal - it is not an authentication
+credential and MUST NOT be treated as a trusted or verified identity.
+
 * Creation of OTU tokens will be limited per IP address to 1 per second. Requests
 beyond 1 per second for up to 10 seconds is considered a soft limit and
 will be met with an HTTP 429 response. Persistent soft limit exhaustion
@@ -63,17 +71,42 @@ beyond 1 per second for up to 10 seconds is considered a soft limit and
 will be met with an HTTP 429 response. Persistent soft limit exhaustion
 for 20 seconds will result in a 5 minute IP-level block.
 
+* Creation of OTU tokens will be limited per `client-id` to 1 per second.
+Requests beyond 1 per second for up to 10 seconds is considered a soft
+limit and will be met with an HTTP 429 response. Persistent soft limit
+exhaustion for 20 seconds will result in a 5 minute `client-id`-level
+block.
+
 * Creation of OTU tokens will be limited to a maximum of 10 tokens per username
 on a rolling basis - i.e., only 10 tokens will be stored in the table
 and available for use at any given time without limit to replenishment
 subject to the above limits. Issuance of token #11 will cause #1 to
 be expired, and so forth.
 
+* Creation of OTU tokens will be limited to a maximum of 10 tokens per
+`client-id` on a rolling basis, applied independently of the
+per-username limit above - i.e., only 10 tokens will be stored per
+`client-id` and available for use at any given time without limit to
+replenishment subject to the above limits. Issuance of token #11 for
+a given `client-id` will cause #1 to be expired, and so forth.
+
 * Authentication validation requests will be limited to a maximum of 10
 per second per IP on a sliding window basis.  Requests
 beyond 10 per second for up to 10 seconds is considered a soft limit and
 will be met with an HTTP 429 response. Persistent soft limit exhaustion
 for 20 seconds will result in a 5 minute IP-level block.
+
+* In addition to the endpoint-specific IP limits above, all AA requests
+(token creation and validation, combined) from a single IP address are
+subject to an overall abuse limit of 20 requests per second on a sliding
+window basis, regardless of the `username` or `client-id` presented.
+This is a backstop limit intended to catch distributed abuse (e.g.,
+credential stuffing across many usernames, or `client-id` rotation)
+that could otherwise stay under the per-username and per-`client-id`
+thresholds above. Requests beyond this limit for up to 10 seconds is
+considered a soft limit and will be met with an HTTP 429 response.
+Persistent soft limit exhaustion for 20 seconds will result in a 5
+minute IP-level block.
 
 * All API calls will return HTTP 200 upon successful HTTP-level
 and message-syntax correctness. Note: this means that an implementing
@@ -84,9 +117,18 @@ regardless of the internal authentication status.
 
 ### Initial Authentication
 An application shall POST to an endpoint at `https://api.allstarlink.org/TODO/appauth/request`. This endpoint
-is callable unprivileged. The POST shall be a JSON document with two required
-elements `username` and `password`. These correspond to the username and password
-for the AllStarLink account. The API shall also accept a client-optional
+is callable unprivileged. The POST shall be a JSON document with three required
+elements `username`, `password`, and `client-id`. The `username` and `password`
+correspond to the username and password for the AllStarLink account.
+The `client-id` is the UUIDv4 generated once by the application at
+install/configuration time as described above; a request missing
+`client-id` or containing a malformed value shall be rejected with a
+`status` of `false`. `client-id` is stored alongside the token and used
+only to apply the per-`client-id` rate limits described above; it has
+no other effect on authentication success or failure and is never
+returned in the response.
+
+The API shall also accept a client-optional
 `request-id`. The `request-id` field is ignored by the server, except that it
 shall be included in the response when provided in the request.
 The JSON request structure shall be:
@@ -95,7 +137,8 @@ The JSON request structure shall be:
 {
     "username": "STRING",
     "password": "STRING",
-    "request-id": "STRING"
+    "request-id": "STRING",
+    "client-id": "STRING"
 }
 ```
 
@@ -121,10 +164,11 @@ Upon successful authentication by a client using the AA method, a one-time-use t
 shall be generated and stored in a Redis/Valkey database as a string value, so
 that it can be atomically retrieved and removed with `GETDEL` (a hash type
 cannot be used here, as `GETDEL` only operates on string keys). The key shall
-store the associated username as its value and shall be stored as:
+store the associated username and `client-id`, joined by a `:` separator,
+and shall be stored as:
 
 ```
-SET token:<sha256_hex> "<username>" EX 86400
+SET token:<sha256_hex> "<username>:<client-id>" EX 86400
 ```
 
 #### Retrieval / Validation
@@ -135,8 +179,12 @@ the following shall happen:
 only the Redis/Valkey database shall be consulted for the TOKEN,
 the CALLSIGN matched, and then a successful auth returned. When
 retrieved from Redis/Valkey, the API shall use the `GETDEL` method
-to retrieve the token's username and then delete the entry. Regardless
-if the callsign matches or not, the OTU token is consumed.
+to retrieve the stored value and then delete the entry. The value
+shall be split on the first `:` to recover the username (before) and
+the `client-id` (after). The CALLSIGN match is performed against the
+username only; `client-id` is not used in validation logic and is
+retained only for audit/telemetry purposes. Regardless if the callsign
+matches or not, the OTU token is consumed.
 
 If the validation is successful, the return will be `OHYES` followed
 by the callsign.
