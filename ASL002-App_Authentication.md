@@ -67,7 +67,7 @@ limit and will be met with an HTTP 429 response. Persistent soft limit
 exhaustion for 20 seconds will result in a 5 minute `client-id`-level
 block.
 
-* Regardless of `client-id`, creation of OUT tokens will be limited
+* Regardless of `client-id`, creation of OTU tokens will be limited
 per IP address to 10 per second. Requests beyond 1 per second for up to 10 seconds is considered a soft
 limit and will be met with an HTTP 429 response. Persistent soft limit
 exhaustion for 20 seconds will result in a 5 minute `client-id`-level
