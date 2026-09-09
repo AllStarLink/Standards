@@ -61,40 +61,47 @@ requests (see below). It is client-asserted and used solely as a
 rate-limiting and telemetry signal - it is not an authentication
 credential and MUST NOT be treated as a trusted or verified identity.
 
-* Creation of OTU tokens will be limited per `client-id` to 1 per second.
-Requests beyond 1 per second for up to 10 seconds is considered a soft
-limit and will be met with an HTTP 429 response. Persistent soft limit
-exhaustion for 20 seconds will result in a 5 minute `client-id`-level
-block.
-
-* Regardless of `client-id`, creation of OTU tokens will be limited
-per IP address to 10 per second. Requests beyond 1 per second for up to 10 seconds is considered a soft
-limit and will be met with an HTTP 429 response. Persistent soft limit
-exhaustion for 20 seconds will result in a 5 minute `client-id`-level
-block.
 
 * Creation of OTU tokens will be limited to a maximum of 10 tokens per
-`client-id` plus `username` on a rolling basis- i.e., only 10 tokens will be stored per
-`client-id` plus `usernaem` combination. Issuance of token #11 for
-a given `client-id` will cause #1 to be expired, and so forth.
+    `client-id` plus `username` on a rolling basis- i.e., only 10 tokens will be stored per
+    `client-id` plus `usernaem` combination. Issuance of token #11 for
+    a given `client-id` will cause #1 to be expired, and so forth.
 
-* Authentication validation requests will be limited to a maximum of 10
-per second per IP on a sliding window basis.  Requests
-beyond 10 per second for up to 10 seconds is considered a soft limit and
-will be met with an HTTP 429 response. Persistent soft limit exhaustion
-for 20 seconds will result in a 5 minute IP-level block.
+* Limits on token creation:
 
-* In addition to the endpoint-specific IP limits above, all AA requests
-(token creation and validation, combined) from a single IP address are
-subject to an overall abuse limit of 20 requests per second on a sliding
-window basis, regardless of the `username` or `client-id` presented.
-This is a backstop limit intended to catch distributed abuse (e.g.,
-credential stuffing across many usernames, or `client-id` rotation)
-that could otherwise stay under the per-username and per-`client-id`
-thresholds above. Requests beyond this limit for up to 10 seconds is
-considered a soft limit and will be met with an HTTP 429 response.
-Persistent soft limit exhaustion for 20 seconds will result in a 5
-minute IP-level block.
+    * Creation of OTU tokens will be limited per `client-id` to 1 per second.
+    Requests beyond 1 per second for up to 10 seconds is considered a soft
+    limit and will be met with an HTTP 429 response. Persistent soft limit
+    exhaustion for 20 seconds will result in a 5 minute `client-id`-level
+    block.
+
+    * Regardless of `client-id`, creation of OTU tokens will be limited
+    per IP address to 10 per second. Requests beyond 1 per second for up to 10 seconds is considered a soft
+    limit and will be met with an HTTP 429 response. Persistent soft limit
+    exhaustion for 20 seconds will result in a 5 minute `client-id`-level
+    block.
+
+* Limits on token validation:
+
+    * Authentication validation requests will be limited to a maximum of 10
+    per second per IP on a sliding window basis.  Requests
+    beyond 10 per second for up to 10 seconds is considered a soft limit and
+    will be met with an HTTP 429 response. Persistent soft limit exhaustion
+    for 20 seconds will result in a 5 minute IP-level block.
+
+* General limits:
+
+    * In addition to the endpoint-specific limits above, all AA requests
+    (token creation and validation, combined) from a single IP address are
+    subject to an overall abuse limit of 20 requests per second on a sliding
+    window basis, regardless of the `username` or `client-id` presented.
+    This is a backstop limit intended to catch distributed abuse (e.g.,
+    credential stuffing across many usernames, or `client-id` rotation)
+    that could otherwise stay under the per-username and per-`client-id`
+    thresholds above. Requests beyond this limit for up to 10 seconds is
+    considered a soft limit and will be met with an HTTP 429 response.
+    Persistent soft limit exhaustion for 20 seconds will result in a 5
+    minute IP-level block.
 
 * All API calls will return HTTP 200 upon successful HTTP-level
 and message-syntax correctness. Note: this means that an implementing
