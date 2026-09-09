@@ -62,10 +62,13 @@ rate-limiting and telemetry signal - it is not an authentication
 credential and MUST NOT be treated as a trusted or verified identity.
 
 
-* Creation of OTU tokens will be limited to a maximum of 10 tokens per
-    `client-id` plus `username` on a rolling basis- i.e., only 10 tokens will be stored per
-    `client-id` plus `usernaem` combination. Issuance of token #11 for
-    a given `client-id` will cause #1 to be expired, and so forth.
+* Creation of OTU tokens will be limited to a maximum of 10 **live** (i.e.
+    issued and not yet consumed) tokens per `client-id` plus `username`
+    combination. Issuance of an 11th live token for a given pair will cause
+    the oldest live token for that pair to be expired immediately, and so
+    forth. A token is removed from this live count as soon as it is
+    consumed by a validation request, not merely when its TTL elapses -
+    see Rate Limiting Implementation below.
 
 * Limits on token creation:
 
@@ -166,6 +169,63 @@ and shall be stored as:
 SET token:<sha256_hex> "<username>:<client-id>" EX 86400
 ```
 
+#### Rate Limiting Implementation
+To satisfy the limits above with a minimum of Redis round-trips, the token-creation
+and token-validation endpoints shall perform all rate-limit checks and token/list
+bookkeeping as a single atomic operation per request via a server-side Lua script
+(invoked through `redis.Redis.register_script()` / `EVALSHA`, not as separate
+`GET`/`INCR`/`SET` calls from the application).
+
+**Keys used:**
+
+| Key | Type | Purpose | TTL |
+|---|---|---|---|
+| `token:<sha256_hex>` | string | the OTU token itself (`username:client-id`) | 86400s |
+| `rl:create:cid:<client-id>` | string (counter) | per-`client-id` creation rate | 1s window |
+| `rl:create:ip:<ip>` | string (counter) | per-IP creation rate | 1s window |
+| `rl:abuse:ip:<ip>` | string (counter) | combined creation+validation abuse counter | 1s window |
+| `rl:validate:ip:<ip>` | string (counter) | per-IP validation rate | 1s window |
+| `block:cid:<client-id>` | string (flag) | active 5-minute block | 300s |
+| `block:ip:<ip>` | string (flag) | active 5-minute block | 300s |
+| `tokens:<client-id>:<username>` | list | hashes of the up-to-10 live tokens for this pair | none (self-managed) |
+
+**Token-creation script**, atomically:
+
+1. Checks `block:cid:<client-id>` and `block:ip:<ip>`; if either exists, returns `BLOCKED`.
+2. `INCR`/`EXPIRE`s `rl:create:cid:<client-id>`, `rl:create:ip:<ip>`, and `rl:abuse:ip:<ip>`;
+   if any exceeds its threshold, returns `SOFT_LIMIT` (and, if the persistent-exhaustion
+   window is also exceeded, sets the relevant `block:*` key with a 300s TTL and returns
+   `BLOCKED` instead).
+3. `LPUSH`es the new token hash onto `tokens:<client-id>:<username>`; if the list length
+   exceeds 10, `RPOP`s the evicted hash and `DEL`s its `token:<evicted_hash>` entry, per
+   the 10-live-token cap.
+4. `SET`s `token:<sha256_hex>` with the new value and 86400s TTL.
+5. Returns `OK`.
+
+**Token-validation script**, atomically:
+
+1. Increments/expires `rl:validate:ip:<ip>` and `rl:abuse:ip:<ip>`; if either exceeds its
+   threshold, returns `SOFT_LIMIT` / `BLOCKED` following the same logic as creation.
+2. `GETDEL`s `token:<sha256_hex>` to retrieve and remove the stored value, then splits it
+   on the first `:` to recover `username` and `client-id`.
+3. `LREM`s the consumed hash from `tokens:<client-id>:<username>` (the list is capped at
+   10 entries, so this is an O(10) operation regardless of load) so the live-token count
+   reflects only currently unconsumed tokens rather than the last 10 issued.
+4. Returns the recovered `username` (or `BLOCKED`/`SOFT_LIMIT` from step 1).
+
+The application layer (Python, via `redis-py`) registers both scripts once at process
+startup and calls them with the relevant identifiers as arguments, translating `OK` →
+HTTP 200/`status:true`, `SOFT_LIMIT` → HTTP 429, and `BLOCKED` → HTTP 429 (blocked).
+
+**Known limitation:** a token that is never consumed and never evicted by new issuance
+remains in the `tokens:<client-id>:<username>` list until its own `token:<hash>` key
+naturally expires via TTL (86400s) - nothing proactively prunes the list on passive key
+expiry. This means the live-token count can briefly overcount (treating an
+expired-but-unpruned entry as live) for up to one day in the low-traffic case where
+fewer than 10 tokens are issued in that window. This is considered acceptable and
+self-correcting; exactly solving it would require a keyspace-notification listener
+process, which is not justified by this edge case.
+
 #### Retrieval / Validation
 When the API endpoint for authentication is called at `https://api.allstarlink.org/TODO/appauth/validate`
 the following shall happen:
@@ -179,7 +239,9 @@ shall be split on the first `:` to recover the username (before) and
 the `client-id` (after). The CALLSIGN match is performed against the
 username only; `client-id` is not used in validation logic and is
 retained only for audit/telemetry purposes. Regardless if the callsign
-matches or not, the OTU token is consumed.
+matches or not, the OTU token is consumed, which also removes it from
+the live-token count for its `client-id`/`username` pair (see Rate
+Limiting Implementation above).
 
 If the validation is successful, the return will be `OHYES` followed
 by the callsign.
@@ -274,3 +336,219 @@ supported by the API for *Day + 180* following implementation. Method **RV3** sh
 be supported by the API for *Day + 366*. Additionally, at the end of the
 one-year transitional period the API internal rewrite for `authwebphone.pl` will
 be removed.
+
+## Appendix: Reference Lua Scripts
+These implement the atomic behavior described in Rate Limiting Implementation
+above. Both scripts take the current unix timestamp as an `ARGV`, supplied by
+the Python caller (e.g. `int(time.time())`), rather than calling Redis `TIME`
+internally, so behavior is independent of replication mode. Each script is
+registered once at process startup via `redis.Redis.register_script()` and
+invoked thereafter by its `SHA1` (`EVALSHA`). The two scripts duplicate a
+small rate-check helper rather than sharing it; a production deployment on
+Redis/Valkey 7+ could instead load that helper once as a Redis Function
+(`FUNCTION LOAD`) and call it from both scripts.
+
+### `token_create.lua`
+```lua
+-- Atomically applies all token-creation rate limits, enforces the
+-- 10-live-token cap per client-id+username, and stores the new token.
+--
+-- KEYS[1] = block:cid:<client-id>
+-- KEYS[2] = block:ip:<ip>
+-- KEYS[3] = rl:create:cid:<client-id>
+-- KEYS[4] = rl:create:ip:<ip>
+-- KEYS[5] = rl:abuse:ip:<ip>
+-- KEYS[6] = tokens:<client-id>:<username>
+-- KEYS[7] = token:<sha256_hex>        -- the new token's key
+--
+-- ARGV[1]  = now                      -- unix timestamp (seconds)
+-- ARGV[2]  = token_hash                -- the sha256 hex digest (list entry)
+-- ARGV[3]  = token_value               -- "<username>:<client-id>"
+-- ARGV[4]  = client_id_limit           -- 1   (per second)
+-- ARGV[5]  = ip_create_limit           -- 10  (per second)
+-- ARGV[6]  = ip_abuse_limit            -- 20  (per second)
+-- ARGV[7]  = persist_seconds           -- 20  (continuous violation before block)
+-- ARGV[8]  = block_ttl                 -- 300 (5 minutes)
+-- ARGV[9]  = token_cap                 -- 10  (live tokens per client-id+username)
+-- ARGV[10] = token_ttl                 -- 86400
+--
+-- Returns: "OK" | "SOFT_LIMIT" | "BLOCKED"
+
+local now             = tonumber(ARGV[1])
+local token_hash      = ARGV[2]
+local token_value     = ARGV[3]
+local client_id_limit = tonumber(ARGV[4])
+local ip_create_limit = tonumber(ARGV[5])
+local ip_abuse_limit  = tonumber(ARGV[6])
+local persist_seconds = tonumber(ARGV[7])
+local block_ttl       = tonumber(ARGV[8])
+local token_cap       = tonumber(ARGV[9])
+local token_ttl       = tonumber(ARGV[10])
+
+local block_cid_key = KEYS[1]
+local block_ip_key  = KEYS[2]
+
+-- Already blocked? Bail out without touching any counters.
+if redis.call('EXISTS', block_cid_key) == 1 then
+    return 'BLOCKED'
+end
+if redis.call('EXISTS', block_ip_key) == 1 then
+    return 'BLOCKED'
+end
+
+local RANK = { OK = 0, SOFT_LIMIT = 1, BLOCKED = 2 }
+
+-- Generic 1-second rate check with persistent-violation escalation.
+-- Returns "OK", "SOFT_LIMIT", or "BLOCKED" (and sets block_key on escalation).
+local function check_rate(rate_key, limit, block_key)
+    local count = redis.call('INCR', rate_key)
+    if count == 1 then
+        redis.call('EXPIRE', rate_key, 1)
+    end
+
+    if count <= limit then
+        redis.call('DEL', rate_key .. ':viol')
+        return 'OK'
+    end
+
+    local viol_key = rate_key .. ':viol'
+    local viol_start = redis.call('GET', viol_key)
+    if not viol_start then
+        redis.call('SET', viol_key, now, 'EX', persist_seconds)
+        return 'SOFT_LIMIT'
+    end
+
+    if (now - tonumber(viol_start)) >= persist_seconds then
+        redis.call('SET', block_key, '1', 'EX', block_ttl)
+        redis.call('DEL', viol_key)
+        return 'BLOCKED'
+    end
+
+    return 'SOFT_LIMIT'
+end
+
+local worst = 'OK'
+local r1 = check_rate(KEYS[3], client_id_limit, block_cid_key)
+local r2 = check_rate(KEYS[4], ip_create_limit, block_ip_key)
+local r3 = check_rate(KEYS[5], ip_abuse_limit,  block_ip_key)
+if RANK[r1] > RANK[worst] then worst = r1 end
+if RANK[r2] > RANK[worst] then worst = r2 end
+if RANK[r3] > RANK[worst] then worst = r3 end
+
+if worst ~= 'OK' then
+    return worst
+end
+
+-- Enforce the 10-live-token cap for this client-id + username pair.
+local tokens_key = KEYS[6]
+redis.call('LPUSH', tokens_key, token_hash)
+if redis.call('LLEN', tokens_key) > token_cap then
+    local evicted = redis.call('RPOP', tokens_key)
+    if evicted then
+        redis.call('DEL', 'token:' .. evicted)
+    end
+end
+
+-- Store the new token itself.
+redis.call('SET', KEYS[7], token_value, 'EX', token_ttl)
+
+return 'OK'
+```
+
+### `token_validate.lua`
+```lua
+-- Atomically applies validation-path rate limits, retrieves and consumes
+-- the OTU token, and prunes it from the live-token cap list.
+--
+-- KEYS[1] = block:ip:<ip>
+-- KEYS[2] = rl:validate:ip:<ip>
+-- KEYS[3] = rl:abuse:ip:<ip>
+-- KEYS[4] = token:<sha256_hex>        -- the token being validated
+--
+-- ARGV[1] = now                       -- unix timestamp (seconds)
+-- ARGV[2] = ip_validate_limit         -- 10 (per second)
+-- ARGV[3] = ip_abuse_limit            -- 20 (per second)
+-- ARGV[4] = persist_seconds           -- 20
+-- ARGV[5] = block_ttl                 -- 300
+--
+-- Returns:
+--   "SOFT_LIMIT" | "BLOCKED"          -- rate-limited; token untouched
+--   "NOTFOUND"                        -- token didn't exist / already consumed
+--   "<username>:<client-id>"          -- success; caller splits on first ":"
+--
+-- NOTE: tokens:<client-id>:<username> is only knowable after the token
+-- value is retrieved, so it is built and accessed dynamically below rather
+-- than passed via KEYS. This is safe on a single Redis/Valkey instance; a
+-- clustered deployment would need a hash-tag scheme (e.g.
+-- tokens:{<client-id>}:<username>) so this key and KEYS[4] always resolve
+-- to the same slot.
+
+local now               = tonumber(ARGV[1])
+local ip_validate_limit = tonumber(ARGV[2])
+local ip_abuse_limit    = tonumber(ARGV[3])
+local persist_seconds   = tonumber(ARGV[4])
+local block_ttl         = tonumber(ARGV[5])
+
+local block_ip_key = KEYS[1]
+
+if redis.call('EXISTS', block_ip_key) == 1 then
+    return 'BLOCKED'
+end
+
+local RANK = { OK = 0, SOFT_LIMIT = 1, BLOCKED = 2 }
+
+local function check_rate(rate_key, limit, block_key)
+    local count = redis.call('INCR', rate_key)
+    if count == 1 then
+        redis.call('EXPIRE', rate_key, 1)
+    end
+
+    if count <= limit then
+        redis.call('DEL', rate_key .. ':viol')
+        return 'OK'
+    end
+
+    local viol_key = rate_key .. ':viol'
+    local viol_start = redis.call('GET', viol_key)
+    if not viol_start then
+        redis.call('SET', viol_key, now, 'EX', persist_seconds)
+        return 'SOFT_LIMIT'
+    end
+
+    if (now - tonumber(viol_start)) >= persist_seconds then
+        redis.call('SET', block_key, '1', 'EX', block_ttl)
+        redis.call('DEL', viol_key)
+        return 'BLOCKED'
+    end
+
+    return 'SOFT_LIMIT'
+end
+
+local worst = 'OK'
+local r1 = check_rate(KEYS[2], ip_validate_limit, block_ip_key)
+local r2 = check_rate(KEYS[3], ip_abuse_limit, block_ip_key)
+if RANK[r1] > RANK[worst] then worst = r1 end
+if RANK[r2] > RANK[worst] then worst = r2 end
+
+if worst ~= 'OK' then
+    return worst
+end
+
+local stored = redis.call('GETDEL', KEYS[4])
+if not stored then
+    return 'NOTFOUND'
+end
+
+local sep = string.find(stored, ':')
+local username  = string.sub(stored, 1, sep - 1)
+local client_id = string.sub(stored, sep + 1)
+
+if client_id ~= nil and client_id ~= '' then
+    local tokens_key = 'tokens:' .. client_id .. ':' .. username
+    -- KEYS[4] is "token:<hash>"; strip the "token:" prefix to recover the hash.
+    local token_hash = string.sub(KEYS[4], 7)
+    redis.call('LREM', tokens_key, 0, token_hash)
+end
+
+return stored
+```
