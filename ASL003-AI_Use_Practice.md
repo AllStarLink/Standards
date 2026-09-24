@@ -14,8 +14,7 @@ responsibility for what they submit, and that the contribution is free
 of known license violations.
 
 ## Status
-**DRAFT** - This document is open for comment and incompatible changes
-are acceptable.
+**ActiveT** - n force on the AllStarLink Network; changes require a new revision or a superseding standard.
 
 ## Background
 AI coding assistants and generative tools (collectively, "AI tools") are now
