@@ -2,7 +2,7 @@
 
 **Number:** ASL002<br/>
 **Title:** App Authentication<br/>
-**Author(s):** Jason McCormick<br/>
+**Author(s):** Jason McCormick, Allan Nathanson<br/>
 **Status:** Draft<br/>
 
 ## Abstract

@@ -3,7 +3,8 @@
 **Number:** ASL003<br/>
 **Title:** AI Use Practice<br/>
 **Author(s):** Jason McCormick<br/>
-**Status:** Draft<br/>
+**Status:** Active
+**Effective:** 2026-09-24<br/>
 
 ## Abstract
 This document outlines the acceptable practices for use of AI tools
