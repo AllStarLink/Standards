@@ -3,15 +3,15 @@
 **Number:** ASL002<br/>
 **Title:** App Authentication<br/>
 **Author(s):** Jason McCormick, Allan Nathanson<br/>
-**Status:** Draft<br/>
+**Status:** Accepted<br/>
 
 ## Abstract
 This document outlines the modern method for Application Authentication (AA).
 This replaces the legacy "Web Transceiver" (WT) authentication.
 
 ## Status
-**DRAFT** - This document is open for comment and incompatible changes
-are acceptable.
+*Accepted* - Passed review and frozen; implementers may build against it,
+but it is not yet deployed or in effect.
 
 ## Background
 Years ago, the allstarlink.org website hosted a Java Applet communicator
