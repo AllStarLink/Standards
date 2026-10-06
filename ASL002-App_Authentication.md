@@ -114,7 +114,7 @@ will not incorrectly return an HTTP 403 for a non-forbidden API call
 regardless of the internal authentication status.
 
 ### Initial Authentication
-An application shall POST to an endpoint at `https://api.allstarlink.org/TODO/appauth/request`. This endpoint
+An application shall POST to an endpoint at `https://api.allstarlink.org/v1/appauth/request`. This endpoint
 is callable unprivileged. The POST shall be a JSON document with three required
 elements `username`, `password`, and `client-id`. The `username` and `password`
 correspond to the username and password for the AllStarLink account.
@@ -175,7 +175,7 @@ and token-validation endpoints shall perform all rate-limit checks and token/lis
 bookkeeping as a single atomic operation per request via a server-side Lua script.
 
 #### Retrieval / Validation
-When the API endpoint for authentication is called at `https://api.allstarlink.org/TODO/appauth/validate`
+When the API endpoint for authentication is called at `https://api.allstarlink.org/v1/appauth/validate`
 the following shall happen:
 
 1. [RV1] If the request is in the AA format of `?t=TOKEN&u=CALLSIGN` then
@@ -241,7 +241,7 @@ now functions as follows:
 ```conf
 same => n,Set(TOKEN=${CUT(CALLERID(name),/,1)})
 same => n,Set(CALLSIGN=${CUT(CALLERID(name),/,2)})
-same => n,Set(RESP=${CURL(https://api.allstarlink.org/TODO/appauth/validate?t=${TOKEN}&u=${CALLSIGN})})
+same => n,Set(RESP=${CURL(https://api.allstarlink.org/v1/appauth/validate?t=${TOKEN}&u=${CALLSIGN})})
 same => n,GotoIf($["${RESP:0:1}" = "?"]?hangit)
 same => n,GotoIf($["${RESP:0:1}" = ""]?hangit)
 same => n,GotoIf($["${RESP:0:5}" != "OHYES"]?hangit)
