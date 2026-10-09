@@ -246,6 +246,7 @@ same => n,GotoIf($["${RESP:0:1}" = "?"]?hangit)
 same => n,GotoIf($["${RESP:0:1}" = ""]?hangit)
 same => n,GotoIf($["${RESP:0:5}" != "OHYES"]?hangit)
 same => n,Set(RCALLSIGN=${RESP:5})
+same => n,ExecIf($["${CALLSIGN}" = ""]?Set(CALLSIGN=${RCALLSIGN}))
 same => n,GotoIf($["${RCALLSIGN}" != "${CALLSIGN}"]?hangit)
 same => n,Set(NODENUM=${CALLERID(num)})
 ```
