@@ -6,14 +6,17 @@
 **Status:** Accepted<br/>
 
 ## Abstract
+
 This document outlines the modern method for Application Authentication (AA).
 This replaces the legacy "Web Transceiver" (WT) authentication.
 
 ## Status
+
 *Accepted* - Passed review and frozen; implementers may build against it,
 but it is not yet deployed or in effect.
 
 ## Background
+
 Years ago, the allstarlink.org website hosted a Java Applet communicator
 to interoperate with standard nodes on the AllStarLink Network. In the
 intervening years, the authentication method developed for this applet
@@ -29,7 +32,8 @@ over unencrypted IAX with no replay protections
 
 2. The "credential" is not collision-resistant
 
-## Objectives
+##
+
 This standard shall outline a new mechanism for IAX2 calls between an application
 and a normal node that accomplishes the following:
 
@@ -42,6 +46,7 @@ and a normal node that accomplishes the following:
 4. Improve connection security
 
 ## Technical Specifications
+
 Application Authentication (AA) will work on a one-time-use (OTU) token mechanism. Each
 token shall be provided by an application during an AA session. Once
 a node has used/verified the token, the token will be deleted as part of the
@@ -79,15 +84,15 @@ credential and MUST NOT be treated as a trusted or verified identity.
     block.
 
     * Regardless of `client-id`, creation of OTU tokens will be limited
-    per IP address to 10 per second. Requests beyond 1 per second for up to 10 seconds is considered a soft
+    per IP address to 10 per second. Requests beyond 10 per second for up to 10 seconds is considered a soft
     limit and will be met with an HTTP 429 response. Persistent soft limit
-    exhaustion for 20 seconds will result in a 5 minute (or longer) `client-id`-level
+    exhaustion for 20 seconds will result in a 5 minute (or longer) IP-level
     block.
 
 * Limits on token validation:
 
     * Authentication validation requests will be limited to a maximum of 10
-    per second per IP on a sliding window basis.  Requests
+    per second per IP, counted in one-second windows.  Requests
     beyond 10 per second for up to 10 seconds is considered a soft limit and
     will be met with an HTTP 429 response. Persistent soft limit exhaustion
     for 20 seconds will result in a 5 minute (or longer) IP-level block.
@@ -96,8 +101,8 @@ credential and MUST NOT be treated as a trusted or verified identity.
 
     * In addition to the endpoint-specific limits above, all AA requests
     (token creation and validation, combined) from a single IP address are
-    subject to an overall abuse limit of 20 requests per second on a sliding
-    window basis, regardless of the `username` or `client-id` presented.
+    subject to an overall abuse limit of 20 requests per second, counted in
+    one-second windows, regardless of the `username` or `client-id` presented.
     This is a backstop limit intended to catch distributed abuse (e.g.,
     credential stuffing across many usernames, or `client-id` rotation)
     that could otherwise stay under the per-username and per-`client-id`
@@ -113,11 +118,30 @@ succeeded or failed. Unlike register.allstarlink.org, this API
 will not incorrectly return an HTTP 403 for a non-forbidden API call
 regardless of the internal authentication status.
 
+* Responses that are not HTTP 200 still carry the endpoint's normal
+failure body, so that a client reading only the body cannot mistake
+an error for success:
+
+    * A rate-limited (HTTP 429) token request returns `status` of `false`
+    and an `auth-token` of `null`; a rate-limited validation request
+    returns `?`.
+
+    * A validation request the API cannot answer for any reason, such as
+    an internal error or an unavailable backend, returns `?` with an
+    appropriate HTTP 4xx or 5xx status. The API shall return nothing
+    other than `OHYES...`, an empty string, or `?` from the validation
+    endpoint, and callers shall treat any response that does not begin
+    with `OHYES` as a failure.
+
 ### Initial Authentication
+
 An application shall POST to an endpoint at `https://api.allstarlink.org/v1/appauth/request`. This endpoint
 is callable unprivileged. The POST shall be a JSON document with three required
 elements `username`, `password`, and `client-id`. The `username` and `password`
 correspond to the username and password for the AllStarLink account.
+The `username` is the account's callsign, 1 to 64 letters and digits
+(`[A-Za-z0-9]`), matched without regard to case. Only an account that
+is active and whose callsign has been validated can obtain a token.
 The `client-id` is the UUIDv4 generated once by the application at
 install/configuration time as described above; a request missing
 `client-id` or containing a malformed value shall be rejected with a
@@ -129,6 +153,14 @@ returned in the response.
 The API shall also accept a client-optional
 `request-id`. The `request-id` field is ignored by the server, except that it
 shall be included in the response when provided in the request.
+
+A request body that is not a JSON object is rejected with an HTTP 400.
+Otherwise the response is HTTP 200 with a `status` of `false` if any
+required element is missing, is not a string, is longer than 64
+characters, or is otherwise malformed, or if a `request-id` is present
+but is not a string of at most 64 characters.
+An invalid `request-id` is not echoed.
+
 The JSON request structure shall be:
 
 ```json
@@ -165,16 +197,31 @@ cannot be used here, as `GETDEL` only operates on string keys). The key shall
 store the associated username and `client-id`, joined by a `:` separator,
 and shall be stored as:
 
-```
+```text
 SET token:<sha256_hex> "<username>:<client-id>" EX 86400
 ```
 
+Key names here and below are illustrative. An implementation may add a
+common prefix to every key, for example a hash tag such as `{appauth}:`
+that keeps all keys in one slot so multi-key scripts remain valid on a
+clustered Redis/Valkey.
+
 #### Rate Limiting Implementation
+
 To satisfy the limits above with a minimum of Redis round-trips, the token-creation
 and token-validation endpoints shall perform all rate-limit checks and token/list
 bookkeeping as a single atomic operation per request via a server-side Lua script.
 
+The live-token count for each `client-id`/`username` pair is kept as a list
+of that pair's live token hashes. Issuing a token adds its hash to the list
+and, when the list then exceeds 3 entries, expires the oldest token(s) and
+removes them from the list. Consuming a token in a validation request removes
+its hash from the list. The list itself carries the token TTL (86400 seconds),
+refreshed on every issue, so a pair that stops requesting tokens leaves
+nothing behind.
+
 #### Retrieval / Validation
+
 When the API endpoint for authentication is called at `https://api.allstarlink.org/v1/appauth/validate`
 the following shall happen:
 
@@ -191,17 +238,20 @@ matches or not, the OTU token is consumed, which also removes it from
 the live-token count for its `client-id`/`username` pair (see Rate
 Limiting Implementation above).
 
+The CALLSIGN is matched without regard to case.
+
 If the validation is successful, the return will be `OHYES` followed
-by the callsign.
+by the callsign in upper case.
 
 If the validation is unsuccessful, the return will be an empty string.
 
 2. [RV2] If the request is in the AA format of `?t=TOKEN&u=` (i.e.
 the `u=` parameter is empty) then it shall be assumed that it is
-a modern node with a legacy WT client. In this case,
-an attempt shall be made to retrieve the token with `GETDEL`, but
-the callsign-matching will be skipped and the callsign associated
-with the token will simply be returned following `OHYES`.
+a modern node with a legacy WT client, and that TOKEN is the
+12-character legacy WebTransceiver token rather than an OTU token.
+In this case Redis/Valkey is not consulted: the TOKEN is evaluated
+against the account database exactly as for RV4 below, callsign
+matching is skipped, and the result is returned as for RV4.
 
 3. If the request is in the legacy format of `?TOKEN` then
 the following shall be evaluated in order:
@@ -214,12 +264,18 @@ the following shall be evaluated in order:
 
    b. [RV4] If the `TOKEN` is 12 characters, then it shall be assumed
    to be a legacy node with a legacy client. The current WebTransceiver
-   process will be evaluated (substr(12) on the password hash).
+   process will be evaluated (substr(12) on the password hash). Only
+   an account that is active and whose callsign has been validated is
+   considered; if more than one account matches, the one with the
+   lowest account ID is used. If the validation is successful, the
+   return will be `OHYES` followed by the account's username exactly as
+   stored. If the validation is unsuccessful, the return will be `?`.
 
 4. Anything that is invalid or doesn't parse correctly according to
 RV1 to RV4 will be returned as a "?".
 
 ### Application-Side Usage
+
 In general, the application using the AA method must request a new OTU token
 before making a connection to a node. The application may store the
 username and password of the AllStarLink portal account at its discretion
@@ -228,19 +284,21 @@ subject to the overall rate-limits described above.
 
 When connecting to a node over IAX, the callsign and token shall be passed in the
 `CALLERID(name)` data element, the same way the WebTransceiver token is passed
-today. The format of this shall be `TOKEN/CALLSIGN`. Upon sending an IAX2 call
+today. The format of this shall be `TOKEN/CALLSIGN`, with CALLSIGN in upper
+case. Upon sending an IAX2 call
 to a node, the application should consider the token consumed and delete it,
 regardless of whether or not the connection succeeds. Future calls to
 the new node must retrieve and use a new key.
 
 ### Node-Side Usage
+
 Upon implementation of this spec, `extensions.conf` shall be changed
 for the `[allstar-public]` context such that the authentication test
 now functions as follows:
 
 ```conf
 same => n,Set(TOKEN=${CUT(CALLERID(name),/,1)})
-same => n,Set(CALLSIGN=${CUT(CALLERID(name),/,2)})
+same => n,Set(CALLSIGN=${TOUPPER(${CUT(CALLERID(name),/,2)})})
 same => n,Set(RESP=${CURL(https://api.allstarlink.org/v1/appauth/validate?t=${TOKEN}&u=${CALLSIGN})})
 same => n,GotoIf($["${RESP:0:1}" = "?"]?hangit)
 same => n,GotoIf($["${RESP:0:1}" = ""]?hangit)
@@ -262,10 +320,12 @@ by internally rewriting `https://register.allstarlink.org/cgi-bin/authwebphone.p
 to the new API system.
 
 ## Transition Timeline
+
 Implementation of this standard shall start a transition timeline of
 366 days.
 
 ### Authentication Methods
+
 Legacy "Web Transceiver" authentication - hooking `login.php` and
 calling `webtransceiver.php` will be supported for 180 days following
 the implementation date. At that time, `webtransceiver.php` will be
@@ -276,6 +336,7 @@ The API `/api/v2/auth-wt-legacy.php` will be retired 180 days
 following the implementation date.
 
 ### Validation Methods
+
 Method **RV1** is the permanent, long-term API for Application Authentication
 and will be supported from *Day D* of implementation.
 
