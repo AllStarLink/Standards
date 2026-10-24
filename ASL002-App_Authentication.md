@@ -208,9 +208,20 @@ clustered Redis/Valkey.
 
 #### Rate Limiting Implementation
 
-To satisfy the limits above with a minimum of Redis round-trips, the token-creation
-and token-validation endpoints shall perform all rate-limit checks and token/list
-bookkeeping as a single atomic operation per request via a server-side Lua script.
+To satisfy the limits above with a minimum of Redis round-trips, rate-limit
+checks and token/list bookkeeping shall be performed atomically via server-side
+Lua scripts. The token-validation endpoint uses a single script per request.
+The token-creation endpoint uses two: the first applies the creation limits
+before the password is checked, so that failed logins count against the
+limits; the second, run only after a successful password check, stores the
+new token and updates the live-token list.
+
+A "persistent soft limit exhaustion" is a streak of over-limit requests that
+arrive no more than a short gap (e.g. 2 seconds) apart. A request that falls
+within the limit does not reset the streak; the streak ends only when
+over-limit requests stop for the length of the gap. Otherwise a client sending
+just over the limit (for example 2 per second against a 1 per second limit,
+one allowed and one rejected each second) would never be blocked.
 
 The live-token count for each `client-id`/`username` pair is kept as a list
 of that pair's live token hashes. Issuing a token adds its hash to the list
