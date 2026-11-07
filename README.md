@@ -3,9 +3,9 @@
 This repository contains the documented standards for the AllStarLink
 Network that are used in the following ways:
 
-1. Registration of app_rpt to the AllStarLink Network
+1. Registration of app\_rpt to the AllStarLink Network
 2. Directory services provided by the AllStarLink Network to clients
-3. Statistics APIs for app_rpt to publish statistics
+3. Statistics APIs for app\_rpt to publish statistics
 4. Other APIs
 5. Other administrative policies that have community relevance
 
@@ -17,9 +17,9 @@ supported features, APIs, and other structures.
 | Name | Status | Description |
 | --- | --- | --- |
 | ASL001-Contributing | *Active* | Contributor standards for all code contributions to AllStarLink |
-| ASL002-App_Authentication | *Accepted* | Technical specification of the Application Authentication (AA) method |
-| ASL003-AI_Use_Practice | *Active* | Practices on use of AI-contributed code and information to AllStarLink |
-| ASL004-Node_Key-Based_Authentication | *Draft* | Description of using public-private keypairs for node authentication |
+| ASL002-App\_Authentication | *Active* | Technical specification of the Application Authentication (AA) method |
+| ASL003-AI\_Use\_Practice | *Active* | Practices on use of AI-contributed code and information to AllStarLink |
+| ASL004-Node\_Key-Based\_Authentication | *Draft* | Description of using public-private keypairs for node authentication |
 
 ## Taxonomy
 
