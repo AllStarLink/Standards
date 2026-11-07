@@ -3,7 +3,7 @@
 **Number:** ASL002<br/>
 **Title:** App Authentication<br/>
 **Author(s):** Jason McCormick, Allan Nathanson<br/>
-**Status:** Accepted<br/>
+**Status:** Active<br/>
 
 ## Abstract
 
@@ -12,8 +12,14 @@ This replaces the legacy "Web Transceiver" (WT) authentication.
 
 ## Status
 
-*Accepted* - Passed review and frozen; implementers may build against it,
-but it is not yet deployed or in effect.
+**Active** - In force on the AllStarLink Network; changes require a new
+revision or a superseding standard.
+
+| Date | What Happens |
+| --- | --- |
+| **December 5, 2026** | The one-year transition period begins. |
+| **June 3, 2027** | Apps still using the old WebTransceiver login stop working. |
+| **December 6, 2027** | Nodes that have not been updated can no longer accept connections from apps. |
 
 ## Background
 
